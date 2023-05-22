@@ -1,16 +1,16 @@
-use postgres:: { Client, NoTls };
-use postgres:: { Error as PostgresError };
-use std::fmt:: format;
-use std::net:: { TcpListener, TcpStream };
-use std::io:: { Read, Write };
-use std::env
+use postgres::{ Client, NoTls };
+use postgres::{ Error as PostgresError };
+
+use std::net::{ TcpListener, TcpStream };
+use std::io::{ Read, Write };
+use std::env;
 
 
 #[macro_use]
 extern crate serde_derive;
 
 // Mode: User struct with id, firstname, lastname, mail.
-
+#[derive(Serialize, Deserialize)]
 struct  User {
     id: Option<i32>,
     firstname: String,
@@ -65,7 +65,7 @@ fn handle_client(mut stream: TcpStream) {
             let (status_line, content) = match &*request{
                 r if r.starts_with("POST /users") => handle_post_request(r),
                 r if r.starts_with("GET /users/") => handle_get_request(r),
-                r if r.starts_with("GET /users/") => handle_get_all_request(r),
+                r if r.starts_with("GET /users") => handle_get_all_request(r),
                 r if r.starts_with("PUT /users/") => handle_put_request(r),
                 r if r.starts_with("DELETE /users/") => handle_delete_request(r),
                 _ => (NOT_FOUND.to_string(), "404 NOT FOUND".to_string()),
@@ -103,21 +103,22 @@ fn handle_post_request( request: &str) -> (String, String) {
 
 fn handle_get_request( request: &str) -> (String, String) {
     match (get_id(&request).parse::<i32>(), Client::connect(DB_URL, NoTls)) {
-        (Ok(id), Ok(mut client)) => 
-        match client.query_one("SELECT * FROM users where id = $1", &[&id]) {
-            Ok(row) => {
-                let user = User {
-                    id: row.get(0),
-                    firstname: row.get(1),
-                    lastname: row.get(2),
-                    mail: row.get(3),
-                };
+        (Ok(id), Ok(mut client)) =>
+            match client.query_one("SELECT * FROM users WHERE id = $1", &[&id]) {
+                Ok(row) => {
+                    let user = User {
+                        id: row.get(0),
+                        firstname: row.get(1),
+                        lastname: row.get(2),
+                        mail: row.get(3),
+                    };
 
-                (OK_RESPONSE.to_string(), serde_json::to_string(&user).unwrap())
+                    (OK_RESPONSE.to_string(), serde_json::to_string(&user).unwrap())
+                }
+                _ => (NOT_FOUND.to_string(), "User not found".to_string()),
             }
-            _ => (NOT_FOUND.to_string(), "User not found".to_string())
-        }
-        _ => (INTERNAL_ERROR.to_string(), "Internal error".to_string())
+
+        _ => (INTERNAL_ERROR.to_string(), "Internal error".to_string()),
     }
 }
 
@@ -153,8 +154,8 @@ fn handle_put_request( request: &str) -> (String, String) {
         (Ok(id), Ok(user), Ok(mut client)) => {
             client
                 .execute(
-                    "UPDATE users SET name = $1, email = $2 WHERE id = $3",
-                    &[&user.name, &user.email, &id]
+                    "UPDATE users SET firstname = $1, lastname = $2, email = $3 WHERE id = $3",
+                    &[&user.firstname, &user.lastname, &user.mail, &id]
                 )
                 .unwrap();
 
@@ -187,7 +188,7 @@ fn handle_delete_request( request: &str) -> (String, String) {
 
 // setting up db.
 
-fn set_db() -> Result<(), PostgresError> {
+fn set_database() -> Result<(), PostgresError> {
     let mut client = Client::connect(DB_URL, NoTls)?;
     
     client.batch_execute(
